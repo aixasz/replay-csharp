@@ -1,12 +1,7 @@
 ﻿using ICSharpCode.AvalonEdit;
-using System;
-using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Media;
 
@@ -17,30 +12,37 @@ namespace Replay.UI
     /// </summary>
     public class PromptAdorner : Adorner
     {
-        private readonly FormattedText prompt;
+        private readonly TextEditor editor;
+        private readonly Typeface typeface;
+        private static readonly SolidColorBrush color = new SolidColorBrush(Colors.White);
+        private static readonly double PromptOffset = -8 / 9d;
 
         public PromptAdorner(UIElement adornedElement) : base(adornedElement)
         {
             if (!(this.AdornedElement is TextEditor editor))
                 return;
-            SolidColorBrush color = new SolidColorBrush(Colors.White);
-            var typeface = editor.FontFamily.GetTypefaces().First();
-
-            prompt = new FormattedText(">",
-                CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
-                typeface, editor.FontSize, color, 0);
+            // store properties that will never change
+            this.typeface = editor.FontFamily.GetTypefaces().First();
+            this.editor = editor;
         }
 
         protected override void OnRender(DrawingContext drawingContext)
         {
-            prompt.PixelsPerDip = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+            double fontSize = editor.FontSize;
+            var prompt = new FormattedText(">",
+                CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
+                typeface, fontSize, color, 0)
+            {
+                PixelsPerDip = VisualTreeHelper.GetDpi(this).PixelsPerDip
+            };
+            drawingContext.DrawText(prompt, new Point(PromptOffset * fontSize, 0));
+        }
 
-            //var coords = this.AdornedElement
-            //    .TransformToAncestor(App.Current.MainWindow)
-            //    .Transform(new Point(0, 0));
-
-            drawingContext.DrawText(prompt, new Point(-16, 0));
-
+        internal static void AddTo(UIElement element)
+        {
+            AdornerLayer
+                .GetAdornerLayer(element)
+                .Add(new PromptAdorner(element));
         }
     }
 }

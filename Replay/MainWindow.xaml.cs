@@ -1,51 +1,141 @@
 ﻿using ICSharpCode.AvalonEdit;
 using ICSharpCode.AvalonEdit.CodeCompletion;
-using Microsoft.CodeAnalysis.Scripting;
+using ICSharpCode.AvalonEdit.Editing;
 using Replay.Model;
 using Replay.Services;
 using Replay.UI;
 using System;
-using System.Collections.Generic;
-using System.IO;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Documents;
 using System.Windows.Input;
-using System.Windows.Media;
 
 namespace Replay
 {
     /// <summary>
-    /// Interaction logic for MainWindow.xaml
+    /// Represents a single REPL window.
     /// </summary>
     public partial class MainWindow : Window
     {
-        readonly SyntaxHighlighter syntaxHighlighter = new SyntaxHighlighter();
-        readonly ScriptEvaluator scriptEvaluator = new ScriptEvaluator();
-        readonly CodeCompleter codeCompleter = new CodeCompleter();
+        CompletionWindow completionWindow;
+        readonly ReplServices services = new ReplServices();
         readonly ReplViewModel Model = new ReplViewModel();
-        private int index = 0;
-        private CompletionWindow completionWindow;
 
         public MainWindow()
         {
             InitializeComponent();
             DataContext = Model;
-            Task.Run(WarmpUp);
         }
 
-        private void TextEditor_Initialized(object sender, EventArgs e)
+        private async void TextEditor_PreviewKeyDown(TextEditor lineEditor, KeyEventArgs e)
         {
-            var editor = (TextEditor)sender;
-            AvalonSyntaxHighlightTransformer
-                .Register(editor, syntaxHighlighter);
-            AdornerLayer
-                .GetAdornerLayer(editor)
-                .Add(new PromptAdorner(editor));
-            editor.TextArea.MouseWheel += TextArea_MouseWheel;
+            if (completionWindow?.IsVisible ?? false) return;
+
+            var command = KeyboardShortcuts.MapToCommand(e);
+            if (!command.HasValue) return;
+
+            e.Handled = true;
+            switch (command.Value)
+            {
+                case ReplCommand.EvaluateCurrentLine:
+                    await ReadEvalPrintLoop(lineEditor, stayOnCurrentLine: false);
+                    return;
+                case ReplCommand.ReevaluateCurrentLine:
+                    await ReadEvalPrintLoop(lineEditor, stayOnCurrentLine: true);
+                    return;
+                case ReplCommand.OpenIntellisense:
+                    await CompleteCode(lineEditor);
+                    return;
+                case ReplCommand.GoToFirstLine:
+                    Model.FocusIndex = 0;
+                    return;
+                case ReplCommand.GoToLastLine:
+                    Model.FocusIndex = Model.Entries.Count - 1;
+                    return;
+                case ReplCommand.LineDown when lineEditor.IsCaretOnFinalLine():
+                    Model.FocusIndex++;
+                    return;
+                case ReplCommand.LineUp when lineEditor.IsCaretOnFirstLine():
+                    Model.FocusIndex--;
+                    return;
+                default:
+                    e.Handled = false;
+                    break;
+            }
+        }
+
+        private async void TextEditor_PreviewKeyUp(TextEditor lineEditor, KeyEventArgs e)
+        {
+            if (completionWindow?.IsVisible ?? false) return;
+
+            // complete member accesses
+            if (e.Key == Key.OemPeriod)
+            {
+                await CompleteCode(lineEditor);
+            }
+        }
+
+        private async Task ReadEvalPrintLoop(TextEditor lineEditor, bool stayOnCurrentLine)
+        {
+            // read
+            string text = lineEditor.Text;
+            if (text.Trim() == "exit")
+            {
+                Application.Current.Shutdown();
+            }
+            // eval
+            var result = await services.EvaluateAsync(text);
+            // print
+            Print(lineEditor, result);
+            // loop
+            if (result.Exception == null && !stayOnCurrentLine)
+            {
+                MoveToNextLine(lineEditor);
+            }
+        }
+
+        private static void Print(TextEditor lineEditor, EvaluationResult result)
+        {
+            lineEditor.ViewModel().SetResult(result);
+        }
+
+        private void MoveToNextLine(TextEditor lineEditor)
+        {
+            int currentIndex = Model.Entries.IndexOf(lineEditor.ViewModel());
+            if (currentIndex == Model.Entries.Count - 1)
+            {
+                Model.Entries.Add(new LineEditorViewModel());
+            }
+            Model.FocusIndex = currentIndex + 1;
+        }
+
+        private async Task CompleteCode(TextEditor lineEditor)
+        {
+            var completions = await services.CompleteCodeAsync(lineEditor.Text);
+            if (completions.Any())
+            {
+                completionWindow = new IntellisenseWindow(lineEditor.TextArea, completions);
+            }
+        }
+
+        private async void TextEditor_Initialized(TextEditor lineEditor, EventArgs e)
+        {
+            PromptAdorner.AddTo(lineEditor);
+            lineEditor.TextArea.MouseWheel += TextArea_MouseWheel;
+            await services.ConfigureSyntaxHighlightingAsync(lineEditor);
+        }
+
+        private void TextEditor_Loaded(TextEditor lineEditor, RoutedEventArgs e)
+        {
+            if (lineEditor.ViewModel().IsFocused)
+            {
+                Keyboard.Focus(lineEditor.TextArea);
+            }
+        }
+
+        private void TextEditor_Unloaded(TextEditor lineEditor, RoutedEventArgs e)
+        {
+            lineEditor.TextArea.MouseWheel -= TextArea_MouseWheel;
         }
 
         /// <summary>
@@ -54,131 +144,48 @@ namespace Replay
         /// swallows scroll events by default. So we listen for scroll events
         /// on the textarea, and re-raise them on our window's scrollview.
         /// </summary>
-        private void TextArea_MouseWheel(object sender, MouseWheelEventArgs e)
+        private void TextArea_MouseWheel(TextArea lineEditor, MouseWheelEventArgs e)
         {
             if (e.Handled) return;
             e.Handled = true;
             this.Scroll.RaiseEvent(new MouseWheelEventArgs(e.MouseDevice, e.Timestamp, e.Delta)
             {
                 RoutedEvent = MouseWheelEvent,
-                Source = sender
+                Source = lineEditor
             });
         }
 
-        private async void TextEditor_PreviewKeyDown(object sender, KeyEventArgs e)
+        private void TextEditor_GotFocus(TextEditor lineEditor, RoutedEventArgs e)
         {
-            var repl = (TextEditor)sender;
-            // enter evaluates the script, but shift-enter is for a soft newline within the textarea
-            if (e.Key == Key.Enter && !Keyboard.Modifiers.HasFlag(ModifierKeys.Shift))
+            // update our viewmodel if the user manually focuses a lineEditor (e.g. with the mouse).
+            int newIndex = Model.Entries.IndexOf(lineEditor.ViewModel());
+            if (Model.FocusIndex != newIndex)
             {
-                e.Handled = true;
-                // read
-                string text = repl.Text;
-                // eval
-                var result = await Evaluate(text);
-                // print
-                Output(repl, result);
-                // loop
-                if(result.Exception == null
-                    && !Keyboard.Modifiers.HasFlag(ModifierKeys.Control)) //ctrl-enter stays on the current line
-                {
-                    MoveToNextLine(repl);
-                }
-            }
-            else if (e.Key == Key.Space && Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
-            {
-                e.Handled = true;
-                var completions = await codeCompleter.Complete(repl.Text);
-
-                if(completions.Any())
-                {
-                    completionWindow = new CompletionWindow(repl.TextArea);
-                    var windowItems = completionWindow.CompletionList.CompletionData;
-                    foreach (var completion in completions)
-                    {
-                        windowItems.Add(new CodeCompletionSuggestion(completion.DisplayText));
-                    }
-                    completionWindow.Show();
-                    //completionWindow.Closed += delegate {
-                    //    completionWindow = null;
-                    //};
-                }
+                Model.FocusIndex = newIndex;
             }
         }
 
-        /// <summary>
-        /// Run the script and return the result, capturing any exceptions or standard output.
-        /// </summary>
-        private async Task<EvaluationResult> Evaluate(string text)
+        private void Window_PreviewMouseWheel(Window sender, MouseWheelEventArgs e)
         {
-            if (string.IsNullOrWhiteSpace(text))
+            // scale the font size
+            if(Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
             {
-                return new EvaluationResult();
-            }
-
-            using(var stdout = new ConsoleOutputWriter())
-            {
-                var evaluated = await EvaluateCapturingError(text);
-                return new EvaluationResult
-                {
-                    ScriptResult = evaluated.Result,
-                    Exception = evaluated.Exception,
-                    StandardOutput = stdout.GetOutputOrNull()
-                };
+                int delta = e.Delta / Math.Abs(e.Delta); // -1 or +1;
+                this.Window.FontSize += delta;
+                Thickness padding = this.ReplEntries.Padding;
+                this.ReplEntries.Padding = new Thickness(padding.Left + delta, padding.Top, padding.Right, padding.Bottom);
             }
         }
 
-        private async Task<(ScriptState<object> Result, Exception Exception)> EvaluateCapturingError(string text)
-        {
-            ScriptState<object> result = null;
-            Exception exception = null;
-            try
-            {
-                result = await scriptEvaluator.Evaluate(text);
-                exception = result?.Exception;
-            }
-            catch (Exception e)
-            {
-                exception = e;
-            }
-            return (result, exception);
-        }
-
-        private static void Output(TextEditor repl, EvaluationResult result)
-        {
-            var viewmodel = (ReplLineViewModel)repl.DataContext;
-            viewmodel.SetResult(result);
-        }
-
-        private void MoveToNextLine(TextEditor repl)
-        {
-            int currentIndex = Model.Entries.IndexOf((ReplLineViewModel)repl.DataContext);
-            if (currentIndex == Model.Entries.Count - 1)
-            {
-                Model.Entries.Add(new ReplLineViewModel());
-                this.index = currentIndex + 1;
-            }
-            else
-            {
-                Model.FocusIndex = currentIndex + 1;
-            }
-        }
-
-        private async Task WarmpUp()
-        {
-            const string code = @"using System; Console.WriteLine(""Hello""); ""Hello""";
-            syntaxHighlighter.Highlight(code);
-            await scriptEvaluator.Evaluate(code);
-        }
-
-        private void TextEditor_Loaded(object sender, RoutedEventArgs e)
-        {
-            Model.FocusIndex = index;
-        }
-
-        private void TextEditor_Unloaded(object sender, RoutedEventArgs e)
-        {
-            ((TextEditor)sender).TextArea.MouseWheel -= TextArea_MouseWheel;
-        }
+        #region ugly casting of untyped event handlers
+        private void TextEditor_GotFocus(object sender, RoutedEventArgs e) => TextEditor_GotFocus((TextEditor)sender, e);
+        private void TextEditor_Unloaded(object sender, RoutedEventArgs e) => TextEditor_Unloaded((TextEditor)sender, e);
+        private void TextEditor_Loaded(object sender, RoutedEventArgs e) => TextEditor_Loaded((TextEditor)sender, e);
+        private void TextEditor_Initialized(object sender, EventArgs e) => TextEditor_Initialized((TextEditor)sender, e);
+        private void TextEditor_PreviewKeyUp(object sender, KeyEventArgs e) => TextEditor_PreviewKeyUp((TextEditor)sender, e);
+        private void TextEditor_PreviewKeyDown(object sender, KeyEventArgs e) => TextEditor_PreviewKeyDown((TextEditor)sender, e);
+        private void TextArea_MouseWheel(object sender, MouseWheelEventArgs e) => TextArea_MouseWheel((TextArea)sender, e);
+        private void Window_PreviewMouseWheel(object sender, MouseWheelEventArgs e) => Window_PreviewMouseWheel((Window)sender, e);
+        #endregion
     }
 }

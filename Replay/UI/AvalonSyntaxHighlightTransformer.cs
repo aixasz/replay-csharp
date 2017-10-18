@@ -1,13 +1,7 @@
 ﻿using ICSharpCode.AvalonEdit.Rendering;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using ICSharpCode.AvalonEdit.Document;
 using Replay.Services;
 using System.Windows.Media;
-using ICSharpCode.AvalonEdit;
 
 namespace Replay.UI
 {
@@ -34,12 +28,6 @@ namespace Replay.UI
                     part.TextRunProperties.SetForegroundBrush(new SolidColorBrush(span.Color));
                 });
             }
-        }
-
-        public static void Register(TextEditor editor, SyntaxHighlighter syntaxHighlighter)
-        {
-            editor.TextArea.TextView.LineTransformers
-                .Add(new AvalonSyntaxHighlightTransformer(syntaxHighlighter));
         }
     }
 }

@@ -11,6 +11,11 @@ namespace Replay.Model
     /// </summary>
     public class ReplViewModel : INotifyPropertyChanged
     {
+        public ReplViewModel()
+        {
+            FocusIndex = 0;
+        }
+
         private WindowState windowState;
         public WindowState WindowState
         {
@@ -18,8 +23,8 @@ namespace Replay.Model
             set => SetField(ref windowState, value);
         }
 
-        public ObservableCollection<ReplLineViewModel> Entries { get; } =
-            new ObservableCollection<ReplLineViewModel> { new ReplLineViewModel() };
+        public ObservableCollection<LineEditorViewModel> Entries { get; } =
+            new ObservableCollection<LineEditorViewModel> { new LineEditorViewModel() };
 
         private int? focusIndex;
         public int FocusIndex
@@ -27,6 +32,11 @@ namespace Replay.Model
             get => focusIndex.GetValueOrDefault(0);
             set
             {
+                if (value == -1 || value == Entries.Count)
+                {
+                    return;
+                }
+
                 if(!focusIndex.HasValue)
                 {
                     Entries[value].IsFocused = true;
