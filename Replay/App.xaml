@@ -4,28 +4,17 @@
              xmlns:local="clr-namespace:Replay.UI"
              xmlns:avalonedit="http://icsharpcode.net/sharpdevelop/avalonedit" x:Class="Replay.App"
              xmlns:completion="clr-namespace:ICSharpCode.AvalonEdit.CodeCompletion;assembly=ICSharpCode.AvalonEdit"
+             xmlns:rendering="clr-namespace:ICSharpCode.AvalonEdit.Rendering;assembly=ICSharpCode.AvalonEdit"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries >
                 <ResourceDictionary Source="UI/ScrollbarStyles.xaml" />
             </ResourceDictionary.MergedDictionaries>
-            <local:StringToVisibilityConverter x:Key="StringToVisibilityConverter" />
-            <!--<SolidColorBrush x:Key="BackgroundColor" Color="#303030"/>-->
-            <SolidColorBrush x:Key="BackgroundColor" Color="#313540"/>
-
-            <Style x:Key="{x:Type local:IntellisenseWindow }" TargetType="{x:Type local:IntellisenseWindow}">
-                <Setter Property="WindowStyle" Value="None"/>
-                <Setter Property="AllowsTransparency" Value="True"/>
-            </Style>
-            <Style x:Key="{x:Type completion:CompletionListBox }" TargetType="{x:Type completion:CompletionListBox}">
-                <Setter Property="Foreground" Value="#dddddd"/>
-                <!-- Background color -->
-                <Setter Property="Background" Value="#292c35"/>
-            </Style>
+            <local:NullToVisibilityConverter x:Key="NullToVisibilityConverter" />
+            <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
             <SolidColorBrush x:Key="BackgroundHighlightColor" Color="#555555"/>
-            <Style x:Key="ReplEditor" TargetType="{x:Type avalonedit:TextEditor}">
-                <Setter Property="Foreground" Value="White"/>
+            <Style x:Key="{x:Type avalonedit:TextEditor}" TargetType="{x:Type avalonedit:TextEditor}">
                 <Setter Property="Background" Value="Transparent"/>
                 <Setter Property="HorizontalScrollBarVisibility" Value="Hidden" />
                 <Setter Property="VerticalScrollBarVisibility" Value="Hidden" />
@@ -50,6 +39,101 @@
                         <Setter Property="FocusManager.FocusedElement" Value="{Binding RelativeSource={RelativeSource Self}}"/>
                     </DataTrigger>
                 </Style.Triggers>
+            </Style>
+            <Style x:Key="{x:Type rendering:TextView}" TargetType="{x:Type rendering:TextView}">
+                <Setter Property="LinkTextForegroundBrush" Value="#8be9fd"/>
+            </Style>
+
+
+
+
+
+
+
+            <Style x:Key="{x:Type local:IntellisenseWindow}" TargetType="{x:Type local:IntellisenseWindow}">
+                <Setter Property="WindowStyle" Value="None"/>
+                <Setter Property="ResizeMode" Value="NoResize" />
+                <Setter Property="FontSize" Value="12pt" />
+                <Setter Property="BorderThickness" Value="0" />
+            </Style>
+            <Style x:Key="{x:Type completion:CompletionListBox }" TargetType="{x:Type completion:CompletionListBox}">
+                <Setter Property="Foreground" Value="#dddddd"/>
+                <Setter Property="Background" Value="#44475a"/>
+                <Setter Property="BorderThickness" Value="0"/>
+            </Style>
+
+            <Style TargetType="{x:Type ListBoxItem}" x:Key="CompletionListBoxItem">
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type ListBoxItem}">
+                            <Border Name="Bd"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding Background}"
+                                    BorderThickness="0"
+                                    Padding="5"
+                                    SnapsToDevicePixels="true">
+                                <ContentPresenter
+                                    HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                    VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                    SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"/>
+                            </Border>
+                            <!-- Simplified triggers:
+                                 we don't want a gray selection background when the ListBox doesn't have focus
+                            -->
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsSelected" Value="true">
+                                    <Setter Property="Background">
+                                        <Setter.Value>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                                <GradientStop Color="#4bb2e7" Offset="0.0" />
+                                                <GradientStop Color="#40b1cf" Offset="1.0" />
+                                            </LinearGradientBrush>
+                                        </Setter.Value>
+                                    </Setter>
+                                    <Setter Property="Foreground"
+                                            Value="#ffffff" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <Style TargetType="{x:Type completion:CompletionList}">
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type completion:CompletionList}">
+                            <completion:CompletionListBox x:Name="PART_ListBox"
+                                ItemContainerStyle="{StaticResource CompletionListBoxItem}">
+                                <ItemsControl.LayoutTransform>
+                                    <ScaleTransform ScaleX="{Binding Zoom, Mode=OneTime}" ScaleY="{Binding Zoom, Mode=OneTime}"></ScaleTransform>
+                                </ItemsControl.LayoutTransform>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Horizontal">
+                                            <!--<Image Source="{Binding Image}" Width="16" Height="16" Margin="0,0,2,0"/>-->
+                                            <ContentPresenter Content="{Binding Content}"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </completion:CompletionListBox>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+            <Style TargetType="ToolTip">
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type ToolTip}">
+                            <Border x:Name="Border" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Background="{TemplateBinding Background}" SnapsToDevicePixels="True">
+                                <Border.LayoutTransform>
+                                    <ScaleTransform ScaleX="{Binding Zoom, Mode=OneTime}" ScaleY="{Binding Zoom, Mode=OneTime}"></ScaleTransform>
+                                </Border.LayoutTransform>
+                                <ContentPresenter ContentTemplate="{TemplateBinding ContentTemplate}" Content="{TemplateBinding Content}" ContentStringFormat="{TemplateBinding ContentStringFormat}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" Margin="{TemplateBinding Padding}" SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
             </Style>
         </ResourceDictionary>
     </Application.Resources>

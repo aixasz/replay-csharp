@@ -1,6 +1,10 @@
-﻿using System.Diagnostics;
+﻿using Replay.Logging;
+using System;
+using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Windows;
 
+[assembly: InternalsVisibleTo("Replay.Tests")]
 namespace Replay
 {
     /// <summary>
@@ -11,6 +15,7 @@ namespace Replay
         protected override void OnStartup(StartupEventArgs e)
         {
             EnableDebugListeners();
+            ReportFatalExceptionsToGitHub();
             base.OnStartup(e);
         }
 
@@ -19,20 +24,27 @@ namespace Replay
         {
             PresentationTraceSources.Refresh();
             PresentationTraceSources.DataBindingSource.Listeners.Add(new ConsoleTraceListener());
-            PresentationTraceSources.DataBindingSource.Listeners.Add(new DebugTraceListener());
             PresentationTraceSources.DataBindingSource.Switch.Level = SourceLevels.Warning | SourceLevels.Error;
         }
-    }
 
-    public class DebugTraceListener : TraceListener
-    {
-        public override void Write(string message)
+        [Conditional("RELEASE")]
+        private void ReportFatalExceptionsToGitHub()
         {
-        }
+            AppDomain.CurrentDomain.UnhandledException += (sender, e) =>
+            {
+                if (!e.IsTerminating) return;
 
-        public override void WriteLine(string message)
-        {
-            Debugger.Break();
+                var userSelection = MessageBox.Show(
+                    "An unrecoverable error has occurred. Please press 'Ok' to send this error to GitHub or 'Cancel' to exit the application", "Unrecoverable Error",
+                    MessageBoxButton.OKCancel,
+                    MessageBoxImage.Error
+                );
+
+                if (userSelection == MessageBoxResult.OK)
+                {
+                    new GitHubExceptionReporter().ReportException(e);
+                }
+            };
         }
     }
 }

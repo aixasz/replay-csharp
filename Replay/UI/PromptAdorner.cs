@@ -2,6 +2,8 @@
 using System.Globalization;
 using System.Linq;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Documents;
 using System.Windows.Media;
 
@@ -14,31 +16,38 @@ namespace Replay.UI
     {
         private readonly TextEditor editor;
         private readonly Typeface typeface;
-        private static readonly SolidColorBrush color = new SolidColorBrush(Colors.White);
         private static readonly double PromptOffset = -8 / 9d;
 
-        public PromptAdorner(UIElement adornedElement) : base(adornedElement)
+        public PromptAdorner(TextEditor editor) : base(editor)
         {
-            if (!(this.AdornedElement is TextEditor editor))
-                return;
-            // store properties that will never change
             this.typeface = editor.FontFamily.GetTypefaces().First();
             this.editor = editor;
+            HideAdornerWhenElementHidden(editor);
         }
 
         protected override void OnRender(DrawingContext drawingContext)
         {
             double fontSize = editor.FontSize;
+            Brush foreground = editor.Foreground;
+
             var prompt = new FormattedText(">",
                 CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
-                typeface, fontSize, color, 0)
-            {
-                PixelsPerDip = VisualTreeHelper.GetDpi(this).PixelsPerDip
-            };
+                typeface, fontSize, foreground, VisualTreeHelper.GetDpi(this).PixelsPerDip);
             drawingContext.DrawText(prompt, new Point(PromptOffset * fontSize, 0));
         }
 
-        internal static void AddTo(UIElement element)
+        /// <summary>
+        /// If the UI element is hidden (e.g. the user cleared the screen)
+        /// the adorner should also be hidden.
+        /// </summary>
+        private void HideAdornerWhenElementHidden(UIElement element) =>
+            SetBinding(VisibilityProperty, new Binding(nameof(element.IsVisible))
+            {
+                Source = element,
+                Converter = new BooleanToVisibilityConverter()
+            });
+
+        internal static void AddTo(TextEditor element)
         {
             AdornerLayer
                 .GetAdornerLayer(element)

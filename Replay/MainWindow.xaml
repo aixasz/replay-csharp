@@ -4,54 +4,71 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:Replay.UI"
-        xmlns:model="clr-namespace:Replay.Model"
         xmlns:avalonEdit="http://icsharpcode.net/sharpdevelop/avalonedit"
         mc:Ignorable="d"
         x:Name="Window"
         WindowStyle="None"
         AllowsTransparency="True"
-        Background="{StaticResource BackgroundColor}"
+        Background="{Binding Background, Mode=OneWay}"
         FontFamily="Consolas"
         FontSize="14pt"
-        Foreground="White"
+        Foreground="{Binding Foreground, Mode=OneWay}"
         BorderThickness="1"
-        BorderBrush="#222"
+        BorderBrush="#3e3f45"
         WindowState="{Binding WindowState, Mode=TwoWay}"
         PreviewMouseWheel="Window_PreviewMouseWheel"
-        Title="Replay" Height="500" Width="810">
+        Title="Replay" Height="512" Width="828">
 
     <WindowChrome.WindowChrome>
         <WindowChrome CaptionHeight="{Binding ActualHeight,ElementName=TitleBar}"/>
     </WindowChrome.WindowChrome>
     <DockPanel>
         <local:TitleBar x:Name="TitleBar" DockPanel.Dock="Top" WindowState="{Binding WindowState, Mode=TwoWay}" />
-        <ScrollViewer Padding="0, 0, 0, 8" x:Name="Scroll">
+        <ScrollViewer Padding="0, 0, 0, 8" x:Name="Scroll" Focusable="False" ScrollChanged="Scroll_ScrollChanged">
+            <ScrollViewer.LayoutTransform>
+                <ScaleTransform ScaleX="{Binding Zoom, Mode=OneWay}" ScaleY="{Binding Zoom, Mode=OneWay}"></ScaleTransform>
+            </ScrollViewer.LayoutTransform>
             <ItemsControl x:Name="ReplEntries" Padding="24, 0, 24, 0" ItemsSource="{Binding Path=Entries}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                        <StackPanel>
+                        <StackPanel Visibility="{Binding IsVisible, Converter={StaticResource BooleanToVisibilityConverter}, Mode=OneWay}">
                             <avalonEdit:TextEditor
+                                Foreground="{Binding Foreground, RelativeSource={RelativeSource Mode=FindAncestor, AncestorType=Window}}"
+                                WordWrap="True"
                                 PreviewKeyDown="TextEditor_PreviewKeyDown"
                                 PreviewKeyUp="TextEditor_PreviewKeyUp"
                                 Initialized="TextEditor_Initialized"
                                 FocusManager.GotFocus="TextEditor_GotFocus"
                                 Loaded="TextEditor_Loaded"
                                 Unloaded="TextEditor_Unloaded"
-                                Document="{Binding Document, Mode=TwoWay}"
-                                Style="{DynamicResource ReplEditor}">
+                                Document="{Binding Document, Mode=TwoWay}">
                             </avalonEdit:TextEditor>
-                            <TextBlock Text="{Binding Path=StandardOutput}"
-                                       Visibility="{Binding Path=StandardOutput, Converter={StaticResource StringToVisibilityConverter}}"
-                                       TextWrapping="Wrap"
-                                       Foreground="LightGray" FontStyle="Italic" />
-                            <TextBlock Text="{Binding Path=Error}"
-                                       Visibility="{Binding Path=Error, Converter={StaticResource StringToVisibilityConverter}}"
-                                       TextWrapping="Wrap"
-                                       Foreground="#FF5555" />
-                            <TextBlock Text="{Binding Path=Result}"
-                                       Visibility="{Binding Path=Result, Converter={StaticResource StringToVisibilityConverter}}"
-                                       TextWrapping="Wrap"
-                                       Foreground="White" />
+                            <!-- use TextBox instead of TextBlock to allow selection and copy/paste -->
+                            <TextBox Text="{Binding Path=StandardOutput, Mode=OneWay}"
+                                     Visibility="{Binding Path=StandardOutput, Converter={StaticResource NullToVisibilityConverter}}"
+                                     Foreground="{Binding RelativeSource={RelativeSource FindAncestor, AncestorType={x:Type Window}}, Path=DataContext.Foreground}"
+                                     Background="Transparent"
+                                     TextWrapping="Wrap"
+                                     BorderThickness="0"
+                                     IsReadOnly="True"
+                                     IsReadOnlyCaretVisible="False"
+                                     FontStyle="Italic" />
+                            <TextBox Text="{Binding Path=Error, Mode=OneWay}"
+                                     Visibility="{Binding Path=Error, Converter={StaticResource NullToVisibilityConverter}}"
+                                     Foreground="#FF5555"
+                                     Background="Transparent"
+                                     TextWrapping="Wrap"
+                                     BorderThickness="0"
+                                     IsReadOnly="True"
+                                     IsReadOnlyCaretVisible="False" />
+                            <TextBox Text="{Binding Path=Result, Mode=OneWay}"
+                                     Visibility="{Binding Path=Result, Converter={StaticResource NullToVisibilityConverter}}"
+                                     Foreground="{Binding RelativeSource={RelativeSource FindAncestor, AncestorType={x:Type Window}}, Path=DataContext.Foreground}"
+                                     Background="Transparent"
+                                     TextWrapping="Wrap"
+                                     BorderThickness="0"
+                                     IsReadOnly="True"
+                                     IsReadOnlyCaretVisible="False" />
                         </StackPanel>
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>

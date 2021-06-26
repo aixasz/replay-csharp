@@ -1,14 +1,17 @@
 ﻿using ICSharpCode.AvalonEdit;
-using ICSharpCode.AvalonEdit.CodeCompletion;
 using ICSharpCode.AvalonEdit.Editing;
-using Replay.Model;
+using Replay.Logging;
+using Replay.ViewModel;
 using Replay.Services;
 using Replay.UI;
+using Replay.ViewModel.Services;
 using System;
-using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Threading;
 
 namespace Replay
 {
@@ -17,115 +20,51 @@ namespace Replay
     /// </summary>
     public partial class MainWindow : Window
     {
-        CompletionWindow completionWindow;
-        readonly ReplServices services = new ReplServices();
-        readonly ReplViewModel Model = new ReplViewModel();
+        private readonly WindowViewModel Model;
+        private readonly ViewModelService viewModelService; // "front-end" services that manipulate the viewmodel.
+        private readonly IReplServices replServices; // "back-end" services that handle inspection / evaluation of code.
 
         public MainWindow()
         {
             InitializeComponent();
-            DataContext = Model;
+            this.DataContext = Model = new WindowViewModel();
+            this.replServices = new ReplServices(new RealFileIO());
+            this.viewModelService = new ViewModelService(replServices);
+
+            replServices.UserConfigurationLoaded += ConfigureWindow;
+            Task.Run(BackgroundInitializationAsync);
         }
 
-        private async void TextEditor_PreviewKeyDown(TextEditor lineEditor, KeyEventArgs e)
+        /// <summary>
+        /// Callback for when user settings are loaded
+        /// </summary>
+        private void ConfigureWindow(object sender, UserConfiguration configuration)
         {
-            if (completionWindow?.IsVisible ?? false) return;
-
-            var command = KeyboardShortcuts.MapToCommand(e);
-            if (!command.HasValue) return;
-
-            e.Handled = true;
-            switch (command.Value)
+            var dispatcher = Application.Current?.Dispatcher
+                ?? Dispatcher.CurrentDispatcher;
+            dispatcher.Invoke(() =>
             {
-                case ReplCommand.EvaluateCurrentLine:
-                    await ReadEvalPrintLoop(lineEditor, stayOnCurrentLine: false);
-                    return;
-                case ReplCommand.ReevaluateCurrentLine:
-                    await ReadEvalPrintLoop(lineEditor, stayOnCurrentLine: true);
-                    return;
-                case ReplCommand.OpenIntellisense:
-                    await CompleteCode(lineEditor);
-                    return;
-                case ReplCommand.GoToFirstLine:
-                    Model.FocusIndex = 0;
-                    return;
-                case ReplCommand.GoToLastLine:
-                    Model.FocusIndex = Model.Entries.Count - 1;
-                    return;
-                case ReplCommand.LineDown when lineEditor.IsCaretOnFinalLine():
-                    Model.FocusIndex++;
-                    return;
-                case ReplCommand.LineUp when lineEditor.IsCaretOnFirstLine():
-                    Model.FocusIndex--;
-                    return;
-                default:
-                    e.Handled = false;
-                    break;
-            }
+                Model.Background = new SolidColorBrush(configuration.BackgroundColor);
+                Model.Foreground = new SolidColorBrush(configuration.ForegroundColor);
+            });
         }
 
-        private async void TextEditor_PreviewKeyUp(TextEditor lineEditor, KeyEventArgs e)
-        {
-            if (completionWindow?.IsVisible ?? false) return;
-
-            // complete member accesses
-            if (e.Key == Key.OemPeriod)
-            {
-                await CompleteCode(lineEditor);
-            }
-        }
-
-        private async Task ReadEvalPrintLoop(TextEditor lineEditor, bool stayOnCurrentLine)
-        {
-            // read
-            string text = lineEditor.Text;
-            if (text.Trim() == "exit")
-            {
-                Application.Current.Shutdown();
-            }
-            // eval
-            var result = await services.EvaluateAsync(text);
-            // print
-            Print(lineEditor, result);
-            // loop
-            if (result.Exception == null && !stayOnCurrentLine)
-            {
-                MoveToNextLine(lineEditor);
-            }
-        }
-
-        private static void Print(TextEditor lineEditor, EvaluationResult result)
-        {
-            lineEditor.ViewModel().SetResult(result);
-        }
-
-        private void MoveToNextLine(TextEditor lineEditor)
-        {
-            int currentIndex = Model.Entries.IndexOf(lineEditor.ViewModel());
-            if (currentIndex == Model.Entries.Count - 1)
-            {
-                Model.Entries.Add(new LineEditorViewModel());
-            }
-            Model.FocusIndex = currentIndex + 1;
-        }
-
-        private async Task CompleteCode(TextEditor lineEditor)
-        {
-            var completions = await services.CompleteCodeAsync(lineEditor.Text);
-            if (completions.Any())
-            {
-                completionWindow = new IntellisenseWindow(lineEditor.TextArea, completions);
-            }
-        }
-
-        private async void TextEditor_Initialized(TextEditor lineEditor, EventArgs e)
+        private void TextEditor_Initialized(TextEditor lineEditor, EventArgs _)
         {
             PromptAdorner.AddTo(lineEditor);
             lineEditor.TextArea.MouseWheel += TextArea_MouseWheel;
-            await services.ConfigureSyntaxHighlightingAsync(lineEditor);
+
+            var line = lineEditor.ViewModel();
+            line.SetEditor(lineEditor);
+            line.TriggerIntellisense = (completions) =>
+                new IntellisenseWindow(this.Model.Intellisense, lineEditor.TextArea, completions);
+            lineEditor.TextArea.TextView.LineTransformers.Add(
+                new AvalonSyntaxHighlightTransformer(replServices, line.Id)
+            );
         }
 
-        private void TextEditor_Loaded(TextEditor lineEditor, RoutedEventArgs e)
+
+        private void TextEditor_Loaded(TextEditor lineEditor, RoutedEventArgs _)
         {
             if (lineEditor.ViewModel().IsFocused)
             {
@@ -133,7 +72,17 @@ namespace Replay
             }
         }
 
-        private void TextEditor_Unloaded(TextEditor lineEditor, RoutedEventArgs e)
+        private async void TextEditor_PreviewKeyDown(TextEditor lineEditor, KeyEventArgs e)
+        {
+            await viewModelService.HandleKeyDown(Model, lineEditor.ViewModel(), e);
+        }
+
+        private async void TextEditor_PreviewKeyUp(TextEditor lineEditor, KeyEventArgs e)
+        {
+            await viewModelService.HandleKeyUp(Model, lineEditor.ViewModel(), e);
+        }
+
+        private void TextEditor_Unloaded(TextEditor lineEditor, RoutedEventArgs _)
         {
             lineEditor.TextArea.MouseWheel -= TextArea_MouseWheel;
         }
@@ -155,7 +104,7 @@ namespace Replay
             });
         }
 
-        private void TextEditor_GotFocus(TextEditor lineEditor, RoutedEventArgs e)
+        private void TextEditor_GotFocus(TextEditor lineEditor, RoutedEventArgs _)
         {
             // update our viewmodel if the user manually focuses a lineEditor (e.g. with the mouse).
             int newIndex = Model.Entries.IndexOf(lineEditor.ViewModel());
@@ -165,16 +114,43 @@ namespace Replay
             }
         }
 
-        private void Window_PreviewMouseWheel(Window sender, MouseWheelEventArgs e)
+        private void Window_PreviewMouseWheel(Window _, MouseWheelEventArgs e)
         {
-            // scale the font size
-            if(Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
+            viewModelService.HandleWindowScroll(Model, Keyboard.Modifiers, e);
+        }
+
+        private void Scroll_ScrollChanged(ScrollViewer sender, ScrollChangedEventArgs e)
+        {
+            bool shouldAutoScrollToBottom = sender.Tag == null || (bool)sender.Tag;
+            // set autoscroll mode when user scrolls, and store it in the ScrollViewer's Tag.
+            if (e.ExtentHeightChange == 0)
             {
-                int delta = e.Delta / Math.Abs(e.Delta); // -1 or +1;
-                this.Window.FontSize += delta;
-                Thickness padding = this.ReplEntries.Padding;
-                this.ReplEntries.Padding = new Thickness(padding.Left + delta, padding.Top, padding.Right, padding.Bottom);
+                shouldAutoScrollToBottom = sender.VerticalOffset == sender.ScrollableHeight;
+                sender.Tag = shouldAutoScrollToBottom;
             }
+
+            // autoscroll to bottom
+            if (shouldAutoScrollToBottom && e.ExtentHeightChange != 0)
+            {
+                sender.ScrollToEnd();
+            }
+        }
+
+        /// <summary>
+        /// Roslyn can be a little bit slow to warm up, which can cause lag when the
+        /// user first starts typing / evaluating code. Do the warm up in a background
+        /// thread beforehand to improve the user experience.
+        /// </summary>
+        private Task BackgroundInitializationAsync()
+        {
+            const string usingCode = @"using System;";
+            const string evaluationCode = @"Console.WriteLine(""Hello"");";
+            const string completionCode = @"""World""";
+            return Task.WhenAll(
+                replServices.HighlightAsync(Guid.Empty, usingCode),
+                replServices.AppendEvaluationAsync(Guid.Empty, evaluationCode, new NullLogger()),
+                replServices.CompleteCodeAsync(Guid.Empty, completionCode, completionCode.Length)
+            );
         }
 
         #region ugly casting of untyped event handlers
@@ -186,6 +162,7 @@ namespace Replay
         private void TextEditor_PreviewKeyDown(object sender, KeyEventArgs e) => TextEditor_PreviewKeyDown((TextEditor)sender, e);
         private void TextArea_MouseWheel(object sender, MouseWheelEventArgs e) => TextArea_MouseWheel((TextArea)sender, e);
         private void Window_PreviewMouseWheel(object sender, MouseWheelEventArgs e) => Window_PreviewMouseWheel((Window)sender, e);
+        private void Scroll_ScrollChanged(object sender, ScrollChangedEventArgs e) => Scroll_ScrollChanged((ScrollViewer)sender, e);
         #endregion
     }
 }

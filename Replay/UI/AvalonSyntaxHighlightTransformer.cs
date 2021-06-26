@@ -1,6 +1,9 @@
-﻿using ICSharpCode.AvalonEdit.Rendering;
-using ICSharpCode.AvalonEdit.Document;
+﻿using ICSharpCode.AvalonEdit.Document;
+using ICSharpCode.AvalonEdit.Rendering;
 using Replay.Services;
+using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 using System.Windows.Media;
 
 namespace Replay.UI
@@ -8,25 +11,38 @@ namespace Replay.UI
     /// <summary>
     /// Integration point with Avalon editor for syntax highlighting.
     /// </summary>
-    class AvalonSyntaxHighlightTransformer : DocumentColorizingTransformer
+    class AvalonSyntaxHighlightTransformer : AsyncDocumentColorizingTransformer
     {
-        private readonly SyntaxHighlighter highlighter;
+        private readonly IReplServices replServices;
+        private readonly Guid lineNumber;
 
-        public AvalonSyntaxHighlightTransformer(SyntaxHighlighter highlighter)
+        public AvalonSyntaxHighlightTransformer(IReplServices replServices, Guid lineNumber)
         {
-            this.highlighter = highlighter;
+            this.replServices = replServices;
+            this.lineNumber = lineNumber;
         }
 
-        protected override void ColorizeLine(DocumentLine line)
+        protected async override Task ColorizeLineAsync(DocumentLine line, DocumentContext context, IList<VisualLineElement> elements)
         {
-            string text = CurrentContext.Document.GetText(line);
-            var spans = highlighter.Highlight(text);
-            foreach (var span in spans)
+            if (line.Length == 0) return;
+
+            try
             {
-                base.ChangeLinePart(line.Offset + span.Start, line.Offset + span.End, part =>
+                string text = context.CurrentContext.Document.GetText(line);
+                IReadOnlyCollection<ColorSpan> spans = await replServices.HighlightAsync(lineNumber, text);
+
+                int offset = line.Offset;
+                foreach (var span in spans)
                 {
-                    part.TextRunProperties.SetForegroundBrush(new SolidColorBrush(span.Color));
-                });
+                    base.ChangeLinePart(offset + span.Start, offset + span.End, elements, context, part =>
+                    {
+                        part.TextRunProperties.SetForegroundBrush(new SolidColorBrush(span.Color));
+                    });
+                }
+            }
+            catch (Exception ex) // protect against AvalonEdit library from throwing exceptions
+            {
+                Console.Error.WriteLine(ex.Message);
             }
         }
     }
